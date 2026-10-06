@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aviones cercanos</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>✈ Aviones cercanos</h1>
+    <div class="controls">
+      <label>Radio
+        <select id="radius">
+          <option value="10">10 km</option>
+          <option value="30" selected>30 km</option>
+          <option value="60">60 km</option>
+          <option value="100">100 km</option>
+        </select>
+      </label>
+      <button id="start">Activar GPS y alertas</button>
+    </div>
+    <div id="status" class="status">Presiona el botón para empezar.</div>
+  </header>
+
+  <main>
+    <div id="map"></div>
+    <section>
+      <h2>Vuelos en tu radio <span id="count"></span></h2>
+      <ul id="list"></ul>
+      <p id="airport" class="muted"></p>
+    </section>
+  </main>
+
+  <div id="toasts"></div>
+
+  <footer class="muted">
+    Datos: adsb.lol (ODbL) · OpenSky Network · adsbdb · OurAirports · mapa © OpenStreetMap.
+    Tu ubicación solo se usa para calcular distancias y no se guarda.
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

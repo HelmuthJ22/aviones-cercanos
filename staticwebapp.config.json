@@ -1,0 +1,9 @@
+{
+  "globalHeaders": {
+    "Permissions-Policy": "geolocation=(self)",
+    "X-Content-Type-Options": "nosniff"
+  },
+  "mimeTypes": {
+    "json": "application/json"
+  }
+}
