@@ -10,10 +10,12 @@
 
   // ---------- Mapa ----------
   const map = L.map("map").setView([4.65, -74.1], 8);
-   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-     maxZoom: 19, subdomains: "abcd", referrerPolicy: "strict-origin-when-cross-origin",
-     attribution: "© OpenStreetMap contributors © CARTO"
-   }).addTo(map);
+   if (L.maplibreGL) {
+    L.maplibreGL({
+      style: "https://tiles.openfreemap.org/styles/liberty",
+      attribution: '<a href="https://openfreemap.org">OpenFreeMap</a> © OpenStreetMap contributors'
+    }).addTo(map);
+  }
   const userMarker = L.circleMarker([0, 0], { radius: 8, color: "#38bdf8", fillOpacity: 1 });
   const radiusCircle = L.circle([0, 0], { radius: 30000, color: "#38bdf8", fillOpacity: 0.05 });
 
