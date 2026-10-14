@@ -1,22 +1,74 @@
-{
-  "platform": {
-    "apiRuntime": "node:20"
-  },
-  "globalHeaders": {
-    "Permissions-Policy": "geolocation=(self)",
-    "X-Content-Type-Options": "nosniff"
-  },
-  "mimeTypes": {
-    "json": "application/json"
-  },
-  "routes": [
-    {
-      "route": "/backend/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/README.md",
-      "statusCode": 404
-    }
-  ]
-}
+
+name: backend-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pruebas:
+    name: Pruebas automáticas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias
+        run: pip install -r backend/requirements-dev.txt
+      - name: Ejecutar pytest
+        run: python -m pytest -v backend/tests
+
+  imagenes:
+    name: Imagen ${{ matrix.servicio }} (arm64)
+    needs: pruebas
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm        # runner ARM nativo, igual a la Raspberry Pi
+    strategy:
+      fail-fast: false
+      matrix:
+        servicio: [api, poller, enricher]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nombre y versión de la imagen
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/aviones-${{ matrix.servicio }}" >> "$GITHUB_ENV"
+          echo "VERSION=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Iniciar sesión en GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir imagen
+        run: |
+          docker build \
+            --build-arg APP_VERSION="$VERSION" \
+            -t "$IMAGE:latest" -t "$IMAGE:$VERSION" \
+            "backend/${{ matrix.servicio }}"
+
+      - name: Escaneo de seguridad (Trivy)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image --no-progress \
+            --severity CRITICAL --ignore-unfixed --exit-code 1 \
+            "$IMAGE:latest"
+
+      - name: Publicar imagen
+        run: |
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:latest"
