@@ -1,0 +1,22 @@
+{
+  "platform": {
+    "apiRuntime": "node:20"
+  },
+  "globalHeaders": {
+    "Permissions-Policy": "geolocation=(self)",
+    "X-Content-Type-Options": "nosniff"
+  },
+  "mimeTypes": {
+    "json": "application/json"
+  },
+  "routes": [
+    {
+      "route": "/backend/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/README.md",
+      "statusCode": 404
+    }
+  ]
+}
