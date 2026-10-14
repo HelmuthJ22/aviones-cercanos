@@ -1,0 +1,7 @@
+{
+  "name": "aviones-cercanos-serverless",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Azure Functions (Node 20, sin dependencias) — respaldo serverless de la API de la Raspberry Pi",
+  "engines": { "node": ">=20" }
+}

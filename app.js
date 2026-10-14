@@ -10,7 +10,7 @@
 
   // ---------- Mapa ----------
   const map = L.map("map").setView([4.65, -74.1], 8);
-   if (L.maplibreGL) {
+  if (L.maplibreGL) {
     L.maplibreGL({
       style: "https://tiles.openfreemap.org/styles/liberty",
       attribution: '<a href="https://openfreemap.org">OpenFreeMap</a> © OpenStreetMap contributors'
@@ -50,27 +50,62 @@
   }
 
   // ---------- Consulta a la API ----------
+  // Dos backends con el mismo contrato:
+  //   EDGE  = Raspberry Pi (Docker) vía túnel  → principal
+  //   CLOUD = Azure Functions (serverless) en /api/near del mismo dominio → respaldo
+  const SERVERLESS_URL = "/api/near";
+  const EDGE_TIMEOUT_MS = 6000;
+  const EDGE_RETRY_MS = 60000;      // si la RPi falla, no reintentarla durante 60 s
+  let edgeDownUntil = 0;
+
+  async function postNear(url, body, timeoutMs) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, {
+        method: "POST", signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return await resp.json();
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   async function poll() {
     if (!pos) return;
-    const radius = Number($("radius").value);
-    let data;
-    try {
-      const resp = await fetch(`${API}/api/near`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat: pos.lat, lon: pos.lon, radius_km: radius })
-      });
-      if (resp.status === 503) { setStatus("El servidor está degradado, reintentando…", "warn"); return; }
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      data = await resp.json();
-    } catch (e) {
-      setStatus("No se pudo contactar la API (" + e.message + "). Reintentando…", "err");
-      return;
+    const body = { lat: pos.lat, lon: pos.lon, radius_km: Number($("radius").value) };
+    let data = null, via = null, edgeData = null;
+
+    // 1) Edge (Raspberry Pi)
+    if (Date.now() >= edgeDownUntil) {
+      try {
+        edgeData = await postNear(`${API}/api/near`, body, EDGE_TIMEOUT_MS);
+        if (edgeData.status === "ok") { data = edgeData; via = "Raspberry Pi (edge)"; }
+      } catch (e) {
+        edgeDownUntil = Date.now() + EDGE_RETRY_MS;
+        console.warn("Edge no disponible, usando serverless:", e.message);
+      }
     }
 
+    // 2) Serverless (Azure Functions): si la RPi falló, está "calentando" la zona o tiene datos viejos
+    if (!data) {
+      try {
+        data = await postNear(SERVERLESS_URL, body, 15000);
+        via = "Azure Functions (serverless)";
+      } catch (e) {
+        if (edgeData) { data = edgeData; via = "Raspberry Pi (edge)"; }   // mejor dato viejo que nada
+        else { setStatus("Sin conexión con ningún backend (" + e.message + "). Reintentando…", "err"); return; }
+      }
+    }
+
+    const fuente = `fuente: ${data.source} · procesado en: ${via}`;
     if (data.status === "warming") setStatus(data.message, "warn");
-    else if (data.status === "stale") setStatus(`Datos desactualizados (hace ${data.age_s}s) — fuente: ${data.source}`, "warn");
-    else setStatus(`Actualizado hace ${data.age_s}s — fuente: ${data.source}`);
+    else if (data.status === "stale") setStatus(`Datos desactualizados (hace ${data.age_s}s) — ${fuente}`, "warn");
+    else if (via.startsWith("Azure")) setStatus(`Actualizado — ${fuente}`, "warn");
+    else setStatus(`Actualizado hace ${data.age_s}s — ${fuente}`);
 
     render(data);
     checkAlerts(data.aircraft || []);
