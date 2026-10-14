@@ -25,7 +25,7 @@ ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.
 r = redis.Redis.from_url(VALKEY_URL, decode_responses=True,
                          socket_timeout=2, socket_connect_timeout=2)
 
-app = FastAPI(title="API Aviones Cercanos", version=APP_VERSION)
+app = FastAPI(title="API Aviones Cercanos v2", version=APP_VERSION)
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS,
                    allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
 
