@@ -8,5 +8,15 @@
   },
   "mimeTypes": {
     "json": "application/json"
-  }
+  },
+  "routes": [
+    {
+      "route": "/backend/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/README.md",
+      "statusCode": 404
+    }
+  ]
 }

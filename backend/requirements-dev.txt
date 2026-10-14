@@ -1,0 +1,7 @@
+# Dependencias para las pruebas automáticas (CI)
+fastapi==0.115.6
+uvicorn==0.34.0
+redis==5.2.1
+httpx==0.27.2
+fakeredis==2.26.2
+pytest==8.3.4

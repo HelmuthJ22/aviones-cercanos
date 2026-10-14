@@ -1,0 +1,81 @@
+# Aviones cercanos — Raspberry Pi 4 (1 GB)
+# Las imágenes se construyen, prueban y escanean en GitHub Actions y se publican en ghcr.io.
+# La RPi solo las descarga (scripts/desplegar.sh, cada 5 min por cron).
+# Cada servicio es independiente: si uno se cae, Docker lo reinicia
+# y los demás siguen funcionando.
+
+x-python-service: &py
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    valkey:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options: { max-size: "5m", max-file: "2" }   # que los logs no llenen la SD
+
+services:
+  valkey:                     # almacenamiento en memoria (fork BSD de Redis)
+    image: valkey/valkey:8-alpine
+    command: ["valkey-server", "--maxmemory", "64mb",
+              "--maxmemory-policy", "volatile-lru", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  poller:                     # trae posiciones de adsb.lol / OpenSky
+    <<: *py
+    image: ghcr.io/helmuthj22/aviones-poller:latest   # publicada por GitHub Actions
+    build: ./poller                                     # solo para desarrollo local
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/heartbeat')<90 else 1)"]
+      interval: 30s
+      start_period: 30s
+
+  enricher:                   # rutas (adsbdb) y aeropuertos (OurAirports)
+    <<: *py
+    image: ghcr.io/helmuthj22/aviones-enricher:latest   # publicada por GitHub Actions
+    build: ./enricher                                     # solo para desarrollo local
+    mem_limit: 160m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/heartbeat')<90 else 1)"]
+      interval: 30s
+      start_period: 120s
+
+  api:                        # API REST que consume la página de Azure
+    <<: *py
+    image: ghcr.io/helmuthj22/aviones-api:latest   # publicada por GitHub Actions
+    build: ./api                                     # solo para desarrollo local
+    mem_limit: 128m
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 20s
+      start_period: 20s
+
+  tunnel:                     # HTTPS público sin abrir puertos (túnel rápido)
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "--url", "http://api:8000"]
+    restart: unless-stopped
+    mem_limit: 64m
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: ["rapido"]
+
+  tunnel-fijo:                # túnel con nombre: URL permanente (requiere TUNNEL_TOKEN)
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    restart: unless-stopped
+    mem_limit: 64m
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: ["fijo"]
