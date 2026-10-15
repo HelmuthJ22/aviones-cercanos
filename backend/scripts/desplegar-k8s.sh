@@ -4,6 +4,7 @@
 # Deployments cuya imagen cambió (RollingUpdate: la API no se cae durante la actualización).
 set -euo pipefail
 export KUBECONFIG=${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}
+export PATH="/usr/local/bin:$PATH"   # cron usa un PATH mínimo; kubectl está en /usr/local/bin
 NS=aviones
 SERVICIOS="api poller enricher"
 

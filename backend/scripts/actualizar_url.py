@@ -42,7 +42,9 @@ def load_env():
 def current_tunnel_url():
     """URL actual del túnel: primero en K3s (kubectl), si no, en Docker Compose."""
     import os
-    env = {**os.environ, "KUBECONFIG": os.environ.get("KUBECONFIG", "/etc/rancher/k3s/k3s.yaml")}
+    env = {**os.environ, "KUBECONFIG": os.environ.get("KUBECONFIG", "/etc/rancher/k3s/k3s.yaml"),
+           # cron usa un PATH mínimo (/usr/bin:/bin); kubectl de K3s está en /usr/local/bin
+           "PATH": "/usr/local/bin:" + os.environ.get("PATH", "/usr/bin:/bin")}
     fuentes = [
         ["kubectl", "-n", "aviones", "logs", "deploy/tunnel"],
         ["docker", "compose", "logs", "--no-color", "tunnel"],
