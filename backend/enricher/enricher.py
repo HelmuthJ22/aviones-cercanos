@@ -104,8 +104,10 @@ def main():
                 route = lookup_route(cs)
                 r.set(f"route:{cs}", json.dumps(route),
                       ex=ROUTE_TTL if route else UNKNOWN_TTL)
+                r.hincrby("stats:enricher", "found" if route else "unknown", 1)
             except httpx.HTTPError as e:
                 log.warning("adsbdb falló para %s: %s", cs, e)
+                r.hincrby("stats:enricher", "error", 1)
                 time.sleep(10)
             time.sleep(1.2)   # máx ~1 consulta/s
         except redis.RedisError as e:

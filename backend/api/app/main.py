@@ -11,10 +11,13 @@ import os
 import time
 
 import redis
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
+
+from . import observability as obs
 
 VALKEY_URL = os.getenv("VALKEY_URL", "redis://valkey:6379/0")
 CELL_ACTIVE_S = 120      # una celda sigue activa 2 min después de la última consulta
@@ -25,9 +28,25 @@ ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.
 r = redis.Redis.from_url(VALKEY_URL, decode_responses=True,
                          socket_timeout=2, socket_connect_timeout=2)
 
-app = FastAPI(title="API Aviones Cercanos v2", version=APP_VERSION)
+app = FastAPI(title="API Aviones Cercanos", version=APP_VERSION)
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS,
                    allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+obs.register_collector(r)
+
+
+@app.middleware("http")
+async def medir_peticiones(request: Request, call_next):
+    """Registra cada petición: ruta, método, código de respuesta y latencia."""
+    path = obs.path_label(request.url.path)
+    inicio = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        obs.HTTP_LATENCY.labels(path).observe(time.perf_counter() - inicio)
+        obs.HTTP_REQUESTS.labels(path, request.method, str(status)).inc()
 
 
 class Position(BaseModel):
@@ -85,10 +104,32 @@ def health():
     return status
 
 
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    """Métricas en formato Prometheus (API + poller + enricher + Valkey)."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/api/stats")
+def stats():
+    """Resumen del estado de la plataforma en JSON (lo usa la página estado.html)."""
+    return {"version": APP_VERSION, "rate_limit_per_min": obs.RATE_LIMIT_PER_MIN,
+            **obs.platform_stats(r)}
+
+
 @app.post("/api/near")
-def near(p: Position):
+def near(p: Position, request: Request):
+    permitido, espera = obs.allow_request(
+        r, obs.client_id(request.headers, request.client.host if request.client else None))
+    if not permitido:
+        raise HTTPException(429, "Demasiadas peticiones, intenta en unos segundos",
+                            headers={"Retry-After": str(espera)})
     cell = cell_of(p.lat, p.lon)
     now = time.time()
+    try:
+        r.hincrby("stats:api", "near_requests", 1)
+    except redis.RedisError:
+        pass
     try:
         r.zadd("cells:active", {cell: now + CELL_ACTIVE_S})   # avisa al poller
         raw = r.get(f"cell:{cell}")
@@ -119,6 +160,7 @@ def near(p: Position):
         except redis.RedisError:
             pass
 
+    obs.AIRCRAFT_RETURNED.observe(len(found))
     age = now - data["updated_at"]
     return {"status": "stale" if age > STALE_AFTER_S else "ok",
             "source": data["source"], "age_s": round(age),

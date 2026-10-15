@@ -17,6 +17,7 @@ data:
   POLL_INTERVAL: "10"
   CELL_RADIUS_NM: "100"
   ALLOWED_ORIGINS: "https://lively-cliff-0b8fb780f.2.azurestaticapps.net"
+  RATE_LIMIT_PER_MIN: "120"       # por usuario; alcanza para un salón detrás del mismo wifi
 
 # ───────────────────────────── Valkey (base de datos en memoria) ─────────────────────────────
 ---
@@ -66,7 +67,7 @@ spec:
     - port: 6379
       targetPort: 6379
 
-# ───────────────────────────── API (2 réplicas + autoescalado) ─────────────────────────────
+# ───────────────────────────── API (1–2 réplicas con autoescalado) ─────────────────────────────
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,7 +76,7 @@ metadata:
   namespace: aviones
   labels: { app: api }
 spec:
-  replicas: 2
+  replicas: 1                    # RPi de 1 GB: 1 réplica base, el HPA sube a 2 con carga
   revisionHistoryLimit: 5
   strategy:
     type: RollingUpdate
@@ -85,7 +86,12 @@ spec:
   template:
     metadata:
       labels: { app: api }
+      annotations:                 # descubrimiento estándar para Prometheus
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: api
           image: ghcr.io/helmuthj22/aviones-api:latest
@@ -99,6 +105,9 @@ spec:
             limits:   { cpu: 500m, memory: 128Mi }
           securityContext:
             allowPrivilegeEscalation: false
+          lifecycle:
+            preStop:                     # da tiempo a que el Service deje de enviarle tráfico
+              exec: { command: ["sleep", "5"] }
           readinessProbe:
             httpGet: { path: /health, port: 8000 }
             periodSeconds: 10
@@ -133,8 +142,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: api
-  minReplicas: 2
-  maxReplicas: 4
+  minReplicas: 1
+  maxReplicas: 2
   metrics:
     - type: Resource
       resource:

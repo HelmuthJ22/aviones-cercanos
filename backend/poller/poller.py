@@ -132,6 +132,14 @@ def from_opensky(lat, lon):
 SOURCES = [("adsb.lol", from_adsblol), ("opensky", from_opensky)]
 
 
+def stat(field):
+    """Contador compartido para observabilidad (lo publica la API en /metrics)."""
+    try:
+        r.hincrby("stats:poller", field, 1)
+    except redis.RedisError:
+        pass
+
+
 def fetch(lat, lon):
     """Intenta cada fuente en orden; devuelve (lista, nombre_fuente) o (None, None)."""
     for name, fn in SOURCES:
@@ -141,9 +149,11 @@ def fetch(lat, lon):
         try:
             data = fn(lat, lon)
             b.ok()
+            stat(f"ok:{name}")
             return data, name
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
+                stat(f"ratelimited:{name}")
                 try:
                     wait = int(e.response.headers.get("Retry-After", "30"))
                 except ValueError:
@@ -151,9 +161,11 @@ def fetch(lat, lon):
                 b.pause(min(max(wait, 10), 600))
             else:
                 log.warning("error en %s: %s", name, e)
+                stat(f"fail:{name}")
                 b.fail()
         except Exception as e:  # noqa: BLE001
             log.warning("error en %s: %s", name, e)
+            stat(f"fail:{name}")
             b.fail()
     return None, None
 

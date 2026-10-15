@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estado del sistema — Aviones cercanos</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:12px; padding:12px 16px; }
+    .card { background:var(--card); border-radius:12px; padding:14px 16px; }
+    .card h3 { margin:0 0 6px; font-size:.8rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+    .big { font-size:1.9rem; font-weight:700; }
+    .ok { color:#22c55e; } .bad { color:var(--err); } .warn { color:var(--warn); }
+    table { width:100%; border-collapse:collapse; font-size:.9rem; }
+    td { padding:4px 0; border-bottom:1px solid #334155; }
+    td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+    .wide { grid-column:1/-1; }
+    a { color:var(--acc); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📊 Estado del sistema</h1>
+    <div class="status" id="status">Consultando…</div>
+  </header>
+
+  <div class="grid">
+    <div class="card"><h3>Backend edge (RPi + K3s)</h3><div class="big" id="edge">—</div><div class="muted" id="version"></div></div>
+    <div class="card"><h3>Base de datos (Valkey)</h3><div class="big" id="valkey">—</div></div>
+    <div class="card"><h3>Zonas activas</h3><div class="big" id="cells">—</div><div class="muted">celdas 1°×1° con usuarios</div></div>
+    <div class="card"><h3>Aviones en caché</h3><div class="big" id="aircraft">—</div></div>
+    <div class="card"><h3>Aeropuertos cargados</h3><div class="big" id="airports">—</div><div class="muted">OurAirports</div></div>
+    <div class="card"><h3>Consultas atendidas</h3><div class="big" id="requests">—</div><div class="muted" id="ratelimited"></div></div>
+
+    <div class="card"><h3>Poller · fuentes de datos</h3><table id="poller"></table></div>
+    <div class="card"><h3>Enricher · rutas (adsbdb)</h3><table id="enricher"></table></div>
+    <div class="card"><h3>Respaldo serverless (Azure Functions)</h3><div class="big" id="serverless">—</div></div>
+
+    <div class="card wide muted">
+      Se actualiza cada 5 s. Métricas completas en formato Prometheus: <a id="metrics" target="_blank">/metrics</a> ·
+      Documentación de la API: <a id="docs" target="_blank">/docs</a> · <a href="index.html">← Volver al mapa</a>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const API = window.APP_CONFIG.API_URL.replace(/\/$/, "");
+    const $ = (id) => document.getElementById(id);
+    $("metrics").href = API + "/metrics";
+    $("docs").href = API + "/docs";
+
+    const fila = (k, v) => { const tr = document.createElement("tr");
+      tr.innerHTML = "<td></td><td></td>"; tr.cells[0].textContent = k; tr.cells[1].textContent = v; return tr; };
+    function tabla(id, obj, vacio) {
+      const t = $(id); t.replaceChildren();
+      const entradas = Object.entries(obj || {}).sort();
+      if (!entradas.length) t.append(fila(vacio, "—"));
+      for (const [k, v] of entradas) t.append(fila(k.replace(":", " · "), Number(v).toLocaleString("es-CO")));
+    }
+    function marca(id, ok, txtOk, txtMal) { const el = $(id); el.textContent = ok ? txtOk : txtMal; el.className = "big " + (ok ? "ok" : "bad"); }
+
+    async function edge() {
+      try {
+        const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 6000);
+        const s = await (await fetch(API + "/api/stats", { signal: ctrl.signal })).json();
+        marca("edge", true, "En línea", "");
+        $("version").textContent = "versión " + s.version + " · límite " + s.rate_limit_per_min + " pet/min por usuario";
+        marca("valkey", s.valkey_up, "En línea", "Caída");
+        $("cells").textContent = s.active_cells ?? "—";
+        $("aircraft").textContent = s.aircraft_cached ?? "—";
+        $("airports").textContent = (s.airports_loaded ?? 0).toLocaleString("es-CO");
+        $("requests").textContent = Number(s.api?.near_requests || 0).toLocaleString("es-CO");
+        $("ratelimited").textContent = "rechazadas por límite: " + (s.api?.rate_limited || 0);
+        tabla("poller", s.poller, "sin consultas aún");
+        tabla("enricher", s.enricher, "sin búsquedas aún");
+        $("status").textContent = "Actualizado " + new Date().toLocaleTimeString("es-CO");
+        $("status").className = "status";
+      } catch (e) {
+        marca("edge", false, "", "Sin conexión");
+        $("status").textContent = "La Raspberry Pi no responde: la página principal usa el respaldo serverless.";
+        $("status").className = "status warn";
+      }
+    }
+    async function serverless() {
+      try {
+        const r = await fetch("/api/airports?lat=4.7&lon=-74.1&n=1");
+        marca("serverless", r.ok, "En línea", "Error " + r.status);
+      } catch { marca("serverless", false, "", "Sin conexión"); }
+    }
+    edge(); serverless();
+    setInterval(edge, 5000); setInterval(serverless, 60000);
+  </script>
+</body>
+</html>
