@@ -1,0 +1,246 @@
+# Aviones cercanos — Kubernetes (K3s en Raspberry Pi 4, 1 GB)
+# Aplicar:  kubectl apply -f aviones.yaml
+# Revertir: kubectl delete namespace aviones   (y volver a docker compose up -d)
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aviones
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aviones-config
+  namespace: aviones
+data:
+  VALKEY_URL: "redis://valkey:6379/0"
+  POLL_INTERVAL: "10"
+  CELL_RADIUS_NM: "100"
+  ALLOWED_ORIGINS: "https://lively-cliff-0b8fb780f.2.azurestaticapps.net"
+
+# ───────────────────────────── Valkey (base de datos en memoria) ─────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: aviones
+  labels: { app: valkey }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: valkey }
+  template:
+    metadata:
+      labels: { app: valkey }
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          args: ["valkey-server", "--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru",
+                 "--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 250m, memory: 96Mi }
+          readinessProbe:
+            exec: { command: ["valkey-cli", "ping"] }
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["valkey-cli", "ping"] }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: aviones
+spec:
+  selector: { app: valkey }
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+# ───────────────────────────── API (2 réplicas + autoescalado) ─────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: aviones
+  labels: { app: api }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # actualiza sin cortar el servicio
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/helmuthj22/aviones-api:latest
+          imagePullPolicy: IfNotPresent      # las imágenes las descarga desplegar-k8s.sh
+          envFrom:
+            - configMapRef: { name: aviones-config }
+          ports:
+            - containerPort: 8000
+          resources:
+            requests: { cpu: 50m, memory: 48Mi }
+            limits:   { cpu: 500m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: aviones
+spec:
+  type: NodePort                 # accesible en la RPi como localhost:30800
+  selector: { app: api }
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30800
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  namespace: aviones
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 60 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: aviones
+spec:
+  minAvailable: 1               # siempre al menos una réplica de la API en pie
+  selector:
+    matchLabels: { app: api }
+
+# ───────────────────────────── Poller (instancia única) ─────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: poller
+  namespace: aviones
+  labels: { app: poller }
+spec:
+  replicas: 1                    # una sola instancia: evita consultas duplicadas a las APIs públicas
+  revisionHistoryLimit: 5
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: poller }
+  template:
+    metadata:
+      labels: { app: poller }
+    spec:
+      containers:
+        - name: poller
+          image: ghcr.io/helmuthj22/aviones-poller:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: aviones-config }
+            - secretRef: { name: aviones-secrets, optional: true }   # credenciales OpenSky (opcional)
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 250m, memory: 96Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            exec:
+              command: ["python", "-c",
+                "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/heartbeat')<90 else 1)"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+# ───────────────────────────── Enricher (instancia única) ─────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enricher
+  namespace: aviones
+  labels: { app: enricher }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: enricher }
+  template:
+    metadata:
+      labels: { app: enricher }
+    spec:
+      containers:
+        - name: enricher
+          image: ghcr.io/helmuthj22/aviones-enricher:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: aviones-config }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 250m, memory: 160Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            exec:
+              command: ["python", "-c",
+                "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/heartbeat')<90 else 1)"]
+            initialDelaySeconds: 120
+            periodSeconds: 30
+
+# ───────────────────────────── Túnel Cloudflare (HTTPS público) ─────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tunnel
+  namespace: aviones
+  labels: { app: tunnel }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: tunnel }
+  template:
+    metadata:
+      labels: { app: tunnel }
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args: ["tunnel", "--no-autoupdate", "--url", "http://api:8000"]
+          resources:
+            requests: { cpu: 25m, memory: 24Mi }
+            limits:   { cpu: 250m, memory: 64Mi }

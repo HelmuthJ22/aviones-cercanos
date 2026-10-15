@@ -40,11 +40,22 @@ def load_env():
 
 
 def current_tunnel_url():
-    out = subprocess.run(
+    """URL actual del túnel: primero en K3s (kubectl), si no, en Docker Compose."""
+    import os
+    env = {**os.environ, "KUBECONFIG": os.environ.get("KUBECONFIG", "/etc/rancher/k3s/k3s.yaml")}
+    fuentes = [
+        ["kubectl", "-n", "aviones", "logs", "deploy/tunnel"],
         ["docker", "compose", "logs", "--no-color", "tunnel"],
-        cwd=BASE, capture_output=True, text=True, timeout=30)
-    urls = URL_RE.findall(out.stdout + out.stderr)
-    return urls[-1] if urls else None          # la más reciente
+    ]
+    for cmd in fuentes:
+        try:
+            out = subprocess.run(cmd, cwd=BASE, capture_output=True, text=True, timeout=30, env=env)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        urls = URL_RE.findall(out.stdout + out.stderr)
+        if out.returncode == 0 and urls:
+            return urls[-1]              # la más reciente
+    return None
 
 
 def gh(method, url, token, body=None):
