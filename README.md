@@ -1,30 +1,43 @@
 # ✈️ Aviones cercanos
 
-Aplicación web que avisa al usuario cuando un avión pasa cerca de su ubicación, con datos como estos:
+### Para los pilotos frustrados que nunca dejaron de mirar al cielo
 
->
-> **AVA9472 · A320** — Bogotá → Bucaramanga · Avianca · a 17,9 km al N · 4.884 m · 701 km/h
->
+¿Eres de los que escuchan un motor y salen corriendo a la ventana? ¿De los que tienen más horas de vuelo en el simulador que en la vida real, reconocen un A320 por el sonido y le explican a la familia qué es el ATC? Este proyecto es para ti.
 
-El sistema cruza en tiempo real las **posiciones ADS-B** de los aviones con el **GPS del celular** y con una base de **5.279 aeropuertos**. Usa solo **datos abiertos** y **software libre**.
+**Aviones cercanos** convierte tu celular en una pequeña torre de control personal. Abres la página, compartes tu ubicación y te avisa en tiempo real cuando un avión pasa cerca, con todo lo que un buen *avgeek* quiere saber:
 
-- **Procesamiento:** Raspberry Pi 4 de 1 GB con Kubernetes (K3s), en el borde de la red (*edge computing*).
-- **Frontend y respaldo:** Azure Static Web Apps y Azure Functions, ambos en el plan gratuito.
-- **Costo de operación:** $0 al mes.
+> 🔔 **AVA9472 · A320** — Bogotá → Bucaramanga · Avianca · a 17,9 km al norte · 4.884 m · 701 km/h
 
-<!--DIAGRAMAS: quita esta línea de apertura y la de cierre cuando subas las imágenes a docs/
+Ya no tienes que preguntarte "¿y ese para dónde va?". Ahora lo sabes antes de que se pierda entre las nubes.
 
+## ¿Qué obtienes?
 
-| Arquitectura de negocio                                                                    | Arquitectura técnica |
-|--------------------------------------------------------------------------------------------|-----------------------|
-| [![Arquitectura de negocio](docs/arquitectura-negocio.png)](docs/arquitectura-negocio.png) |
-| [![Arquitectura técnica](docs/arquitectura-tecnica.png)](docs/arquitectura-tecnica.png)   |
+- 🛫 **Alertas en tiempo real** de los aviones que vuelan cerca de ti, con aerolínea, modelo, origen, destino, altura, velocidad y distancia.
+- 🗺️ **Mapa en vivo** con tu radio de búsqueda (10–100 km) y el aeropuerto más cercano.
+- 📱 **Sin instalar nada:** funciona desde el navegador del celular, en cualquier lugar.
+- 🔒 **Tu ubicación no se guarda:** solo se usa para calcular distancias.
+- 🛟 **Siempre disponible:** si el servidor principal falla, un respaldo en la nube toma el control en segundos.
 
+## ¿Cómo lo hace?
 
->
+Detrás de la broma hay una plataforma *cloud-native* seria: cruza en tiempo real las **señales ADS-B** que emiten los propios aviones (captadas por una red mundial de receptores voluntarios) con el **GPS del celular** y una base de **5.279 aeropuertos**, usando solo **datos abiertos** y **software libre**.
+
+| | |
+|---|---|
+| **Procesamiento** | Raspberry Pi 4 de 1 GB con Kubernetes (K3s), en el borde de la red (*edge computing*) |
+| **Página y respaldo** | Azure Static Web Apps + Azure Functions (serverless) |
+| **Despliegue** | Automático con GitHub Actions: del commit a producción sin tocar el servidor |
+| **Costo de operación** | **$0 al mes** |
+
+<!--
+  DIAGRAMAS: quita esta línea de apertura y la de cierre cuando subas las imágenes a docs/
+
+| Arquitectura de negocio | Arquitectura técnica |
+|---|---|
+| [![Arquitectura de negocio](docs/arquitectura-negocio.png)](docs/arquitectura-negocio.png) | [![Arquitectura técnica](docs/arquitectura-tecnica.png)](docs/arquitectura-tecnica.png) |
+
 > Los diagramas se pueden editar en [draw.io](https://app.diagrams.net) desde `docs/aviones_cercanos_arquitectura.drawio`.
-> -->
->
+-->
 
 ---
 
@@ -32,14 +45,14 @@ El sistema cruza en tiempo real las **posiciones ADS-B** de los aviones con el *
 
 - [Arquitectura](#arquitectura)
 - [Estructura del repositorio](#estructura-del-repositorio)
-- [Tecnologías](#tecnolog%C3%ADas)
+- [Tecnologías](#tecnologías)
 - [API](#api)
 - [Puesta en marcha](#puesta-en-marcha)
 - [CI/CD](#cicd)
 - [Resiliencia](#resiliencia)
 - [Observabilidad](#observabilidad)
 - [Seguridad y privacidad](#seguridad-y-privacidad)
-- [Operación diaria](#operaci%C3%B3n-diaria)
+- [Operación diaria](#operación-diaria)
 - [Lecciones aprendidas en una RPi de 1 GB](#lecciones-aprendidas-en-una-rpi-de-1-gb)
 - [Fuentes de datos y licencias](#fuentes-de-datos-y-licencias)
 
@@ -55,18 +68,15 @@ El sistema cruza en tiempo real las **posiciones ADS-B** de los aviones con el *
 4. El **poller** consulta adsb.lol solo para las celdas con usuarios activos, con una consulta por celda sin importar cuántos usuarios haya. El **enricher** completa las rutas de vuelo y carga los aeropuertos.
 5. Si la RPi no responde en 6 s, la página usa **Azure Functions** (mismo contrato de API) durante 60 s y después vuelve a la RPi sola.
 
-
 ### Microservicios (5 contenedores)
 
-
-| Contenedor | Imagen                                | Puerto | RAM (req–lím) | Función                                       |
-|------------|---------------------------------------|--------|------------------|------------------------------------------------|
-| `api`      | `ghcr.io/helmuthj22/aviones-api`      | 8000   | 48–128 Mi      | API REST, métricas, límite de peticiones     |
-| `poller`   | `ghcr.io/helmuthj22/aviones-poller`   | —    | 32–96 Mi       | Posiciones ADS-B (adsb.lol → OpenSky)        |
-| `enricher` | `ghcr.io/helmuthj22/aviones-enricher` | —    | 32–160 Mi      | Rutas por callsign y 5.279 aeropuertos         |
-| `valkey`   | `valkey/valkey:8-alpine`              | 6379   | 32–96 Mi       | Datos en memoria con TTL e índice geográfico |
-| `tunnel`   | `cloudflare/cloudflared`              | —    | 24–64 Mi       | HTTPS público sin abrir puertos               |
-
+| Contenedor | Imagen | Puerto | RAM (req–lím) | Función |
+|---|---|---|---|---|
+| `api` | `ghcr.io/helmuthj22/aviones-api` | 8000 | 48–128 Mi | API REST, métricas, límite de peticiones |
+| `poller` | `ghcr.io/helmuthj22/aviones-poller` | — | 32–96 Mi | Posiciones ADS-B (adsb.lol → OpenSky) |
+| `enricher` | `ghcr.io/helmuthj22/aviones-enricher` | — | 32–160 Mi | Rutas por callsign y 5.279 aeropuertos |
+| `valkey` | `valkey/valkey:8-alpine` | 6379 | 32–96 Mi | Datos en memoria con TTL e índice geográfico |
+| `tunnel` | `cloudflare/cloudflared` | — | 24–64 Mi | HTTPS público sin abrir puertos |
 
 Todo el sistema usa **~136 MB de RAM**.
 
@@ -74,22 +84,22 @@ Todo el sistema usa **~136 MB de RAM**.
 
 ## Estructura del repositorio
 
-```.
- 
-├── index.html, app.js, style.css    # Frontend (Azure Static Web Apps)  
-├── config.js                        # URL de la API (se actualiza sola)  
-├── estado.html                      # Panel de estado del sistema  
-├── sw.js                            # Service Worker (notificaciones)  
-├── staticwebapp.config.json         # Rutas, runtime Node 20, bloquea /backend/*  
-├── api/                             # Azure Functions: /api/near y /api/airports (respaldo)  
-├── backend/  
-│   ├── api/                         # FastAPI  
-│   ├── poller/                      # Recolector de posiciones  
-│   ├── enricher/                    # Rutas y aeropuertos  
-│   ├── tests/                       # 19 pruebas (pytest)  
-│   ├── k8s/aviones.yaml             # Manifiestos de Kubernetes  
-│   ├── docker-compose.yml           # Alternativa sin Kubernetes  
-│   └── scripts/                     # despliegue, URL del túnel, encendido/apagado  
+```
+.
+├── index.html, app.js, style.css    # Frontend (Azure Static Web Apps)
+├── config.js                        # URL de la API (se actualiza sola)
+├── estado.html                      # Panel de estado del sistema
+├── sw.js                            # Service Worker (notificaciones)
+├── staticwebapp.config.json         # Rutas, runtime Node 20, bloquea /backend/*
+├── api/                             # Azure Functions: /api/near y /api/airports (respaldo)
+├── backend/
+│   ├── api/                         # FastAPI
+│   ├── poller/                      # Recolector de posiciones
+│   ├── enricher/                    # Rutas y aeropuertos
+│   ├── tests/                       # 19 pruebas (pytest)
+│   ├── k8s/aviones.yaml             # Manifiestos de Kubernetes
+│   ├── docker-compose.yml           # Alternativa sin Kubernetes
+│   └── scripts/                     # despliegue, URL del túnel, encendido/apagado
 └── .github/workflows/               # CI/CD del backend y despliegue de la SWA
 ```
 
@@ -97,19 +107,17 @@ Todo el sistema usa **~136 MB de RAM**.
 
 ## Tecnologías
 
-
-| Capa           | Tecnología                                                  |
-|----------------|--------------------------------------------------------------|
-| Frontend       | HTML + JavaScript, Leaflet, MapLibre GL, teselas OpenFreeMap |
-| Backend        | Python 3, FastAPI, Uvicorn, redis-py                         |
-| Datos          | Valkey 8 (fork libre de Redis): GEO, TTL, LRU                |
-| Contenedores   | Docker (imágenes ARM64)                                     |
-| Orquestación  | K3s (Kubernetes certificado por la CNCF)                     |
-| Serverless     | Azure Functions (Node 20, plan gratuito)                     |
-| Red            | Cloudflare Quick Tunnel                                      |
-| CI/CD          | GitHub Actions, GHCR, Trivy                                  |
-| Observabilidad | Prometheus client (`/metrics`), panel `estado.html`          |
-
+| Capa | Tecnología |
+|---|---|
+| Frontend | HTML + JavaScript, Leaflet, MapLibre GL, teselas OpenFreeMap |
+| Backend | Python 3, FastAPI, Uvicorn, redis-py |
+| Datos | Valkey 8 (fork libre de Redis): GEO, TTL, LRU |
+| Contenedores | Docker (imágenes ARM64) |
+| Orquestación | K3s (Kubernetes certificado por la CNCF) |
+| Serverless | Azure Functions (Node 20, plan gratuito) |
+| Red | Cloudflare Quick Tunnel |
+| CI/CD | GitHub Actions, GHCR, Trivy |
+| Observabilidad | Prometheus client (`/metrics`), panel `estado.html` |
 
 ---
 
@@ -126,21 +134,21 @@ Documentación interactiva (OpenAPI 3.1): `https://<url-del-túnel>/docs`
 Respuesta:
 
 ```json
-{  
-  "status": "ok",  
-  "source": "adsb.lol",  
-  "age_s": 4,  
-  "radius_km": 30,  
-  "count": 2,  
-  "aircraft": [  
-    { "callsign": "AVA9472", "type": "A320", "distance_km": 17.9, "bearing": 2,  
-      "alt_m": 4884, "speed_kmh": 701,  
-      "route": { "airline": "Avianca",  
-                 "origin": { "iata": "BOG", "city": "Bogota" },  
-                 "destination": { "iata": "BGA", "city": "Bucaramanga" } } }  
-  ],  
-  "nearest_airport": { "ident": "SKBO", "name": "El Dorado International Airport",  
-                       "iata": "BOG", "distance_km": 32.2 }  
+{
+  "status": "ok",
+  "source": "adsb.lol",
+  "age_s": 4,
+  "radius_km": 30,
+  "count": 2,
+  "aircraft": [
+    { "callsign": "AVA9472", "type": "A320", "distance_km": 17.9, "bearing": 2,
+      "alt_m": 4884, "speed_kmh": 701,
+      "route": { "airline": "Avianca",
+                 "origin": { "iata": "BOG", "city": "Bogota" },
+                 "destination": { "iata": "BGA", "city": "Bucaramanga" } } }
+  ],
+  "nearest_airport": { "ident": "SKBO", "name": "El Dorado International Airport",
+                       "iata": "BOG", "distance_km": 32.2 }
 }
 ```
 
@@ -150,14 +158,12 @@ Respuesta:
 - `warming`: es la primera consulta en esa zona y los datos llegan en unos segundos.
 - `stale`: se entrega el último dato conocido.
 
-
-| Endpoint         | Descripción                                                            |
-|------------------|-------------------------------------------------------------------------|
-| `GET /health`    | Estado de la API, Valkey y poller, más la versión (commit) desplegada |
-| `GET /api/stats` | Estadísticas de la plataforma (usado por `estado.html`)                |
-| `GET /metrics`   | Métricas en formato Prometheus                                         |
-| `GET /docs`      | Swagger UI                                                              |
-
+| Endpoint | Descripción |
+|---|---|
+| `GET /health` | Estado de la API, Valkey y poller, más la versión (commit) desplegada |
+| `GET /api/stats` | Estadísticas de la plataforma (usado por `estado.html`) |
+| `GET /metrics` | Métricas en formato Prometheus |
+| `GET /docs` | Swagger UI |
 
 ---
 
@@ -171,34 +177,34 @@ Respuesta:
 ### 1. Docker y K3s en la RPi
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh  
-sudo usermod -aG docker $USER          # cerrar sesión y volver a entrar  
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER          # cerrar sesión y volver a entrar
 
-# Límites de memoria para contenedores  
-sudo sed -i '1 s/$/ cgroup_enable=memory cgroup_memory=1/' /boot/firmware/cmdline.txt  
-sudo reboot  
+# Límites de memoria para contenedores
+sudo sed -i '1 s/$/ cgroup_enable=memory cgroup_memory=1/' /boot/firmware/cmdline.txt
+sudo reboot
 
-# K3s ligero (usa Docker como runtime, sin componentes innecesarios)  
-sudo mkdir -p /etc/rancher/k3s  
-sudo tee /etc/rancher/k3s/config.yaml <<'EOF'  
-docker: true  
-disable: [traefik, servicelb, local-storage]  
-disable-cloud-controller: true  
-disable-helm-controller: true  
-disable-network-policy: true  
-write-kubeconfig-mode: "0644"  
-EOF  
+# K3s ligero (usa Docker como runtime, sin componentes innecesarios)
+sudo mkdir -p /etc/rancher/k3s
+sudo tee /etc/rancher/k3s/config.yaml <<'EOF'
+docker: true
+disable: [traefik, servicelb, local-storage]
+disable-cloud-controller: true
+disable-helm-controller: true
+disable-network-policy: true
+write-kubeconfig-mode: "0644"
+EOF
 curl -sfL https://get.k3s.io | sh -
 ```
 
 ### 2. Desplegar el backend
 
 ```bash
-git clone https://github.com/<usuario>/<repo>.git ~/aviones-cercanos  
-cd ~/aviones-cercanos/backend  
-cp .env.example .env                   # GITHUB_TOKEN, GITHUB_REPO, ALLOWED_ORIGINS…  
-kubectl apply -f k8s/aviones.yaml  
-kubectl -n aviones get pods            # todos en Running  
+git clone https://github.com/<usuario>/<repo>.git ~/aviones-cercanos
+cd ~/aviones-cercanos/backend
+cp .env.example .env                   # GITHUB_TOKEN, GITHUB_REPO, ALLOWED_ORIGINS…
+kubectl apply -f k8s/aviones.yaml
+kubectl -n aviones get pods            # todos en Running
 curl localhost:30800/health
 ```
 
@@ -208,12 +214,11 @@ curl localhost:30800/health
 2. App location: `/` · Api location: `api` · Output: *(vacío)*.
 3. Pon la URL de la Static Web App en `ALLOWED_ORIGINS` del `.env`, sin `*` y sin `/` final.
 
-
 ### 4. Tareas automáticas (cron)
 
 ```cron
-PATH=/usr/local/bin:/usr/bin:/bin  
-*/5 * * * * ~/aviones-cercanos/backend/scripts/desplegar-k8s.sh >> ~/desplegar.log 2>&1  
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * ~/aviones-cercanos/backend/scripts/desplegar-k8s.sh >> ~/desplegar.log 2>&1
 */2 * * * * cd ~/aviones-cercanos/backend && python3 scripts/actualizar_url.py >> ~/actualizar_url.log 2>&1
 ```
 
@@ -222,8 +227,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 ## CI/CD
 
 ```
-push a backend/** ──► pytest (19 pruebas) ──► build ARM64 nativo ──► Trivy (CRITICAL) ──► ghcr.io  
-                                                                                            │  
+push a backend/** ──► pytest (19 pruebas) ──► build ARM64 nativo ──► Trivy (CRITICAL) ──► ghcr.io
+                                                                                            │
           RPi (cron cada 5 min): desplegar-k8s.sh ──► docker pull ──► kubectl rollout restart ◄┘
 ```
 
@@ -236,8 +241,8 @@ push a backend/** ──► pytest (19 pruebas) ──► build ARM64 nativo ─
 Pruebas locales:
 
 ```bash
-cd backend  
-pip install -r requirements-dev.txt  
+cd backend
+pip install -r requirements-dev.txt
 python -m pytest -v tests
 ```
 
@@ -245,28 +250,26 @@ python -m pytest -v tests
 
 ## Resiliencia
 
-
-| Mecanismo                      | Qué pasa                                                                                           |
-|--------------------------------|-----------------------------------------------------------------------------------------------------|
-| **Circuit breaker por fuente** | 3 fallos (o un 429) pausan la fuente. adsb.lol pasa automáticamente a **OpenSky**                  |
-| **Degradación controlada**    | Si no hay datos nuevos, se entrega el último con `status: "stale"` en lugar de fallar              |
-| **Respaldo serverless**        | Si la RPi cae, la página usa Azure Functions y después vuelve sola a la RPi                       |
-| **Autorecuperación**          | Liveness y readiness probes; Kubernetes recrea los pods que fallan                                  |
-| **Actualizaciones sin corte**  | `preStop: sleep 5` + `terminationGracePeriodSeconds: 20` + PodDisruptionBudget                      |
-| **Autoescalado**               | HPA de la API: 1–2 réplicas al 60 % de CPU                                                       |
-| **URL del túnel**             | Tras un corte de luz o de internet, `actualizar_url.py` publica la URL nueva y Azure se redespliega |
-
+| Mecanismo | Qué pasa |
+|---|---|
+| **Circuit breaker por fuente** | 3 fallos (o un 429) pausan la fuente. adsb.lol pasa automáticamente a **OpenSky** |
+| **Degradación controlada** | Si no hay datos nuevos, se entrega el último con `status: "stale"` en lugar de fallar |
+| **Respaldo serverless** | Si la RPi cae, la página usa Azure Functions y después vuelve sola a la RPi |
+| **Autorecuperación** | Liveness y readiness probes; Kubernetes recrea los pods que fallan |
+| **Actualizaciones sin corte** | `preStop: sleep 5` + `terminationGracePeriodSeconds: 20` + PodDisruptionBudget |
+| **Autoescalado** | HPA de la API: 1–2 réplicas al 60 % de CPU |
+| **URL del túnel** | Tras un corte de luz o de internet, `actualizar_url.py` publica la URL nueva y Azure se redespliega |
 
 **Prueba de cambio de fuente** (simula la caída de adsb.lol sin tocar el código):
 
 ```bash
-kubectl -n aviones patch deployment poller --type merge \  
-  -p '{"spec":{"template":{"spec":{"hostAliases":[{"ip":"127.0.0.1","hostnames":["api.adsb.lol"]}]}}}}'  
-curl -s localhost:30800/metrics | grep aviones_poller_fetch  
-# → result="fail",source="adsb.lol"  y  result="ok",source="opensky"  
-  
-# Volver a la normalidad  
-kubectl -n aviones patch deployment poller --type json \  
+kubectl -n aviones patch deployment poller --type merge \
+  -p '{"spec":{"template":{"spec":{"hostAliases":[{"ip":"127.0.0.1","hostnames":["api.adsb.lol"]}]}}}}'
+curl -s localhost:30800/metrics | grep aviones_poller_fetch
+# → result="fail",source="adsb.lol"  y  result="ok",source="opensky"
+
+# Volver a la normalidad
+kubectl -n aviones patch deployment poller --type json \
   -p '[{"op":"remove","path":"/spec/template/spec/hostAliases"}]'
 ```
 
@@ -274,9 +277,10 @@ kubectl -n aviones patch deployment poller --type json \
 
 ## Observabilidad
 
-- **`/metrics`** (formato Prometheus):- API: `aviones_http_requests_total`, `aviones_http_request_duration_seconds`, `aviones_rate_limited_total`.
-- Poller y enricher: `aviones_poller_fetch_total{source,result}`, `aviones_enricher_routes_total`.
-- Estado de la plataforma: `aviones_airports_loaded`, `aviones_active_cells`, `aviones_valkey_up`.
+- **`/metrics`** (formato Prometheus):
+  - API: `aviones_http_requests_total`, `aviones_http_request_duration_seconds`, `aviones_rate_limited_total`.
+  - Poller y enricher: `aviones_poller_fetch_total{source,result}`, `aviones_enricher_routes_total`.
+  - Estado de la plataforma: `aviones_airports_loaded`, `aviones_active_cells`, `aviones_valkey_up`.
 - **`estado.html`:** panel en vivo con el estado de edge, Valkey, serverless, fuentes y rutas.
 - El pod de la API tiene anotaciones `prometheus.io/*`, así que cualquier Prometheus lo descubre solo. No se instala Prometheus ni Grafana en la RPi porque ocupan más de 300 MB.
 
@@ -296,15 +300,13 @@ kubectl -n aviones patch deployment poller --type json \
 ## Operación diaria
 
 ```bash
-cd ~/aviones-cercanos/backend  
-./scripts/servicio.sh estado     # pods, API, cron, RAM y temperatura  
-./scripts/servicio.sh apagar     # detiene K3s y cron; la página sigue con Azure Functions  
+cd ~/aviones-cercanos/backend
+./scripts/servicio.sh estado     # pods, API, cron, RAM y temperatura
+./scripts/servicio.sh apagar     # detiene K3s y cron; la página sigue con Azure Functions
 ./scripts/servicio.sh encender   # arranca todo y publica la URL nueva del túnel
 ```
 
->
 > Valkey no guarda datos en disco. Después de encender, el enricher recarga los aeropuertos. Si `aviones_airports_loaded` sigue en 0, ejecuta `kubectl -n aviones rollout restart deployment/enricher`.
->
 
 ---
 
@@ -320,20 +322,16 @@ cd ~/aviones-cercanos/backend
 
 ## Fuentes de datos y licencias
 
-
-| Fuente                                                    | Uso                          | Licencia                          |
-|-----------------------------------------------------------|------------------------------|-----------------------------------|
-| [adsb.lol](https://adsb.lol)                              | Posiciones ADS-B (principal) | ODbL                              |
-| [OpenSky Network](https://opensky-network.org)            | Posiciones ADS-B (respaldo)  | Uso no comercial / investigación |
-| [adsbdb](https://www.adsbdb.com)                          | Rutas por callsign           | MIT                               |
-| [OurAirports](https://ourairports.com)                    | Aeropuertos                  | Dominio público                  |
-| [OpenFreeMap](https://openfreemap.org) / © OpenStreetMap | Mapa base                    | ODbL                              |
-
+| Fuente | Uso | Licencia |
+|---|---|---|
+| [adsb.lol](https://adsb.lol) | Posiciones ADS-B (principal) | ODbL |
+| [OpenSky Network](https://opensky-network.org) | Posiciones ADS-B (respaldo) | Uso no comercial / investigación |
+| [adsbdb](https://www.adsbdb.com) | Rutas por callsign | MIT |
+| [OurAirports](https://ourairports.com) | Aeropuertos | Dominio público |
+| [OpenFreeMap](https://openfreemap.org) / © OpenStreetMap | Mapa base | ODbL |
 
 La cobertura depende de los receptores voluntarios de cada red: si en una zona no hay receptores, no se ven aviones aunque los haya.
 
 ---
 
 **Autor:** Helmuth Rodriguez — Ingeniería de Telecomunicaciones, Universidad Militar Nueva Granada.
-
- 
